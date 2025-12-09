@@ -11,31 +11,24 @@ import time
 from typing import List, Dict
 
 def load_data():
-    """Load and combine data from both consensus files."""
-    data_files = [
-        "data/Consensus items : Group 1 - Red Flag vs Green Flag.json",
-        "data/Consensus items: Group 2 - Red Flag vs Green Flag.json"
-    ]
+    """Load IMDB movie review sentiment data."""
+    data_file = "data/imdb_reviews_sentiment.json"
     
-    combined_data = []
-    
-    for file_path in data_files:
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                combined_data.extend(data)
-        except FileNotFoundError:
-            st.error(f"Data file not found: {file_path}")
-            return pd.DataFrame()
-        except json.JSONDecodeError:
-            st.error(f"Invalid JSON in file: {file_path}")
-            return pd.DataFrame()
+    try:
+        with open(data_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        st.error(f"Data file not found: {data_file}")
+        return pd.DataFrame()
+    except json.JSONDecodeError:
+        st.error(f"Invalid JSON in file: {data_file}")
+        return pd.DataFrame()
     
     # Convert to DataFrame
-    df = pd.DataFrame(combined_data)
+    df = pd.DataFrame(data)
     
-    # Filter out 'Neither' labels for binary classification
-    df = df[df['gold_label'].isin(['Red Flag', 'Green Flag'])]
+    # Filter to only Positive and Negative labels for binary classification
+    df = df[df['gold_label'].isin(['Positive', 'Negative'])]
     
     return df
 
@@ -61,7 +54,7 @@ def create_few_shot_examples(X_train, y_train, n_examples_per_class=10):
     few_shot_examples = []
     
     # Get examples for each class
-    for label in ['Red Flag', 'Green Flag']:
+    for label in ['Positive', 'Negative']:
         class_examples = df_train[df_train['label'] == label].sample(
             n=min(n_examples_per_class, len(df_train[df_train['label'] == label])),
             random_state=42
@@ -80,11 +73,13 @@ def create_few_shot_examples(X_train, y_train, n_examples_per_class=10):
 def build_few_shot_prompt(few_shot_examples: List[Dict], target_text: str) -> str:
     """Build a few-shot prompt for the LLM."""
     
-    prompt = """You are a text classifier that categorizes sentences as either "Red Flag" or "Green Flag".
+    prompt = """You are a movie review sentiment classifier that categorizes reviews as either "Positive" or "Negative".
 
-    Your task is to label the sentence as either 'Green flag' or 'Red flag'. 
-    Base your judgment on the main perspective implied by the text, as follows: If the text contains pronouns like 'I' and 'you', imagine you are hearing the speaker or the speaker is addressing you, and ask yourself: "Is this a green flag or a red flag?" If the text has a 3rd person perspective (with pronouns like "s/he" and "them"), put yourself in the narrator's shoes and ask yourself: "Is this a green or a red flag?"
-    Try to consider the sentence as a stand-alone text (even if you know the source).
+Your task is to analyze the sentiment expressed in movie reviews:
+- **Positive**: Reviews that express enjoyment, praise, satisfaction, or recommendation of the movie.
+- **Negative**: Reviews that express disappointment, criticism, dissatisfaction, or advise against watching.
+
+Analyze the overall tone, word choice, and emotional expression in the review to determine the sentiment.
 
 Here are some examples:
 
@@ -92,10 +87,10 @@ Here are some examples:
     
     # Add few-shot examples
     for example in few_shot_examples:
-        prompt += f'Text: "{example["sentence"]}"\nClassification: {example["label"]}\n\n'
+        prompt += f'Review: "{example["sentence"]}"\nSentiment: {example["label"]}\n\n'
     
     # Add the target text
-    prompt += f'Text: "{target_text}"\nClassification:'
+    prompt += f'Review: "{target_text}"\nSentiment:'
     
     return prompt
 
@@ -121,7 +116,7 @@ def predict_with_llm(client, few_shot_examples: List[Dict], texts: List[str], mo
             response = client.chat.completions.create(
                 model=model_name,
                 messages=[
-                    {"role": "system", "content": "You are a helpful text classifier. Respond with exactly 'Red Flag' or 'Green Flag' only."},
+                    {"role": "system", "content": "You are a helpful movie review sentiment classifier. Respond with exactly 'Positive' or 'Negative' only."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.1,
@@ -131,13 +126,13 @@ def predict_with_llm(client, few_shot_examples: List[Dict], texts: List[str], mo
             prediction = response.choices[0].message.content.strip()
             
             # Clean up the prediction
-            if "Red Flag" in prediction:
-                prediction = "Red Flag"
-            elif "Green Flag" in prediction:
-                prediction = "Green Flag"
+            if "Positive" in prediction:
+                prediction = "Positive"
+            elif "Negative" in prediction:
+                prediction = "Negative"
             else:
-                # Default to Green Flag if unclear
-                prediction = "Green Flag"
+                # Default to Positive if unclear
+                prediction = "Positive"
             
             result = {
                 'text': text,
@@ -154,7 +149,7 @@ def predict_with_llm(client, few_shot_examples: List[Dict], texts: List[str], mo
             # Return default result on error
             result = {
                 'text': text,
-                'prediction': "Green Flag"
+                'prediction': "Positive"
             }
             results.append(result)
     
@@ -177,22 +172,22 @@ def evaluate_llm_model(client, few_shot_examples: List[Dict], X_test, y_test, mo
 
 def main():
     st.set_page_config(
-        page_title="Red Flag vs Green Flag LLM Classifier",
-        page_icon="🚩",
+        page_title="Movie Review Sentiment Classifier",
         layout="wide"
     )
     
-    st.title("🚩 Red Flag vs Green Flag LLM Many-Shot Classifier")
+    st.title("Movie Review Sentiment Classifier")
     st.markdown("*Powered by OpenAI GPT with Few-Shot Learning*")
+    st.markdown("Classify movie reviews as **Positive** or **Negative**")
     st.markdown("---")
     
     # API Configuration
-    st.sidebar.header("🔧 API Configuration")
+    st.sidebar.header("API Configuration")
     api_key = st.sidebar.text_input("OpenAI API Key", type="password", help="Enter your OpenAI API key")
     model_choice = st.sidebar.selectbox("Model", ["gpt-4.1-nano"], index=0)
     
     if not api_key:
-        st.warning("⚠️ Please enter your OpenAI API key in the sidebar to continue.")
+        st.warning("Please enter your OpenAI API key in the sidebar to continue.")
         return
     
     # Initialize OpenAI client
@@ -211,7 +206,7 @@ def main():
         return
     
     # Sidebar with dataset info
-    st.sidebar.header("📊 Dataset Information")
+    st.sidebar.header("Dataset Information")
     st.sidebar.metric("Total Examples", len(df))
     
     class_counts = df['gold_label'].value_counts()
@@ -221,13 +216,13 @@ def main():
     # Configuration
     st.sidebar.header("⚙️ Model Configuration")
     n_examples_per_class = st.sidebar.slider("Examples per class in prompt", min_value=0, max_value=50, value=5, 
-                                            help="Number of examples for each class (Red/Green Flag) to include in the few-shot prompt")
+                                            help="Number of examples for each sentiment class (Positive/Negative) to include in the few-shot prompt")
     test_size = st.sidebar.slider("Test Set Size (%)", min_value=10, max_value=50, value=30) / 100
     
     # Main content - Single column layout
-    st.header("🤖 LLM Setup")
+    st.header("LLM Setup")
     
-    if st.button("🔄 Prepare Few-Shot Examples", type="primary"):
+    if st.button("Prepare Few-Shot Examples", type="primary"):
         with st.spinner("Preparing few-shot examples..."):
             # Create train-test split
             X_train, X_test, y_train, y_test = create_balanced_split(df, test_size=test_size)
@@ -244,43 +239,43 @@ def main():
             st.session_state.y_train = y_train
             st.session_state.model_name = model_choice
             
-            st.success(f"✅ Few-shot setup complete!")
+            st.success(f"Few-shot setup complete!")
             
             # Show few-shot examples info
             st.info(f"""
             **Few-Shot Examples**: {len(few_shot_examples)} total
-            - {len([ex for ex in few_shot_examples if ex['label'] == 'Red Flag'])} Red Flag examples
-            - {len([ex for ex in few_shot_examples if ex['label'] == 'Green Flag'])} Green Flag examples
+            - {len([ex for ex in few_shot_examples if ex['label'] == 'Positive'])} Positive examples
+            - {len([ex for ex in few_shot_examples if ex['label'] == 'Negative'])} Negative examples
             
-            **Test Set**: {len(X_test)} examples  
-            - Red Flag: {sum(y_test == 'Red Flag')}
-            - Green Flag: {sum(y_test == 'Green Flag')}
+            **Test Set**: {len(X_test)} reviews  
+            - Positive: {sum(y_test == 'Positive')}
+            - Negative: {sum(y_test == 'Negative')}
             """)
             
             # Show sample few-shot examples
-            with st.expander("🔍 View Sample Few-Shot Examples"):
+            with st.expander("View Sample Few-Shot Examples"):
                 for example in few_shot_examples[:6]:  # Show first 6
-                    if example['label'] == 'Red Flag':
+                    if example['label'] == 'Negative':
                         st.error(f"**{example['label']}**: {example['sentence'][:100]}...")
                     else:
                         st.success(f"**{example['label']}**: {example['sentence'][:100]}...")
                 
                 # Show example prompt
                 st.markdown("---")
-                st.subheader("📝 Example Full Prompt")
-                example_prompt = build_few_shot_prompt(few_shot_examples, "This is an example sentence for demonstration.")
+                st.subheader("Example Full Prompt")
+                example_prompt = build_few_shot_prompt(few_shot_examples, "This movie was absolutely amazing!")
                 st.code(example_prompt, language="text")
     
     st.markdown("---")
     
     # Show LLM evaluation if available
     if 'few_shot_examples' in st.session_state:
-        st.header("📊 LLM Performance Evaluation")
+        st.header("LLM Performance Evaluation")
         
-        with st.expander("🧪 Evaluate LLM on Test Set", expanded=False):
-            st.warning("⚠️ This will make API calls to evaluate performance. Estimated cost: ~$0.05-0.20")
+        with st.expander("Evaluate LLM on Test Set", expanded=False):
+            st.warning("This will make API calls to evaluate performance. Estimated cost: ~$0.05-0.20")
             
-            if st.button("🔬 Run LLM Evaluation"):
+            if st.button("Run LLM Evaluation"):
                 with st.spinner("Evaluating LLM performance on test set..."):
                     try:
                         y_test_sample, y_pred, X_test_sample = evaluate_llm_model(
@@ -298,14 +293,14 @@ def main():
                         
                         # Calculate accuracy
                         accuracy = accuracy_score(y_test_sample, y_pred)
-                        st.success(f"✅ LLM Evaluation Complete! Test Accuracy: {accuracy:.3f}")
+                        st.success(f"LLM Evaluation Complete! Test Accuracy: {accuracy:.3f}")
                         
                     except Exception as e:
                         st.error(f"Evaluation failed: {e}")
         
         # Show evaluation results if available
         if 'y_test_sample' in st.session_state and 'y_pred' in st.session_state:
-            st.subheader("📈 Evaluation Results")
+            st.subheader("Evaluation Results")
             
             # Classification report
             try:
@@ -321,16 +316,16 @@ def main():
                     st.subheader("Classification Metrics")
                     # Extract only the class-specific metrics
                     simple_metrics = {
-                        'Green Flag': {
-                            'Precision': report['Green Flag']['precision'],
-                            'Recall': report['Green Flag']['recall'], 
-                            'F1-Score': report['Green Flag']['f1-score'],
+                        'Positive': {
+                            'Precision': report['Positive']['precision'],
+                            'Recall': report['Positive']['recall'], 
+                            'F1-Score': report['Positive']['f1-score'],
                             'Accuracy': report['accuracy']
                         },
-                        'Red Flag': {
-                            'Precision': report['Red Flag']['precision'],
-                            'Recall': report['Red Flag']['recall'],
-                            'F1-Score': report['Red Flag']['f1-score'],
+                        'Negative': {
+                            'Precision': report['Negative']['precision'],
+                            'Recall': report['Negative']['recall'],
+                            'F1-Score': report['Negative']['f1-score'],
                             'Accuracy': report['accuracy']
                         }
                     }
@@ -345,8 +340,8 @@ def main():
                         cm,
                         text_auto=True,
                         labels={'x': 'Predicted', 'y': 'Actual'},
-                        x=['Green Flag', 'Red Flag'],
-                        y=['Green Flag', 'Red Flag'],
+                        x=['Negative', 'Positive'],
+                        y=['Negative', 'Positive'],
                         color_continuous_scale='Blues'
                     )
                     st.plotly_chart(fig, use_container_width=True)
@@ -355,7 +350,7 @@ def main():
                 st.error(f"Error generating evaluation metrics: {e}")
                 
             # Show sample predictions
-            st.subheader("🔍 Predictions")
+            st.subheader("Predictions")
             sample_df = pd.DataFrame({
                 'Actual': st.session_state.y_test_sample,
                 'Predicted': st.session_state.y_pred,
@@ -376,18 +371,18 @@ def main():
     
     st.markdown("---")
     
-    st.header("🎯 Make Predictions")
+    st.header("Classify Movie Reviews")
     
     if 'few_shot_examples' not in st.session_state:
-        st.warning("⚠️ Please prepare few-shot examples first!")
+        st.warning("Please prepare few-shot examples first!")
     else:
         # Single text prediction
-        st.subheader("Single Text Classification")
-        user_text = st.text_area("Enter text to classify:", 
-                                placeholder="Type or paste a sentence here...")
+        st.subheader("Single Review Classification")
+        user_text = st.text_area("Enter a movie review to classify:", 
+                                placeholder="Type or paste a movie review here...")
         
-        if st.button("🔍 Classify Text") and user_text:
-            with st.spinner("Classifying with LLM..."):
+        if st.button("Classify Review") and user_text:
+            with st.spinner("Analyzing sentiment with LLM..."):
                 results = predict_with_llm(
                     st.session_state.client, 
                     st.session_state.few_shot_examples, 
@@ -397,66 +392,72 @@ def main():
                 result = results[0]
             
             # Display prediction
-            if result['prediction'] == 'Red Flag':
-                st.error(f"🚩 **Red Flag**")
+            if result['prediction'] == 'Negative':
+                st.error(f"**Negative** - This review expresses an unfavorable opinion!")
             else:
-                st.success(f"✅ **Green Flag**")
+                st.success(f"**Positive** - This review expresses a favorable opinion!")
         
         st.markdown("---")
         
         # Batch upload
-        st.subheader("📤 Batch Upload & Classification")
-        st.warning("⚠️ Note: LLM classification incurs API costs. Use small batches for testing.")
+        st.subheader("Batch Upload & Classification")
+        st.warning("Note: LLM classification incurs API costs. Use small batches for testing.")
         
         # File upload methods
         upload_method = st.radio("Choose upload method:", ["Text File", "CSV File", "Manual Input"])
         
         if upload_method == "Text File":
-            uploaded_file = st.file_uploader("Upload a text file (one sentence per line)", 
+            uploaded_file = st.file_uploader("Upload a text file (one review per line)", 
                                             type=['txt'])
             if uploaded_file is not None:
                 texts = uploaded_file.read().decode('utf-8').strip().split('\\n')
                 texts = [t.strip() for t in texts if t.strip()]
                 
-                st.info(f"Found {len(texts)} texts. Estimated cost: ~${len(texts) * 0.001:.3f}")
+                st.info(f"Found {len(texts)} reviews. Estimated cost: ~${len(texts) * 0.001:.3f}")
                 
-                if st.button("🔍 Classify Batch (Text File)"):
+                if st.button("Classify Batch (Text File)"):
                     process_batch_llm(texts)
         
         elif upload_method == "CSV File":
-            uploaded_file = st.file_uploader("Upload a CSV file with a 'sentence' column", 
+            uploaded_file = st.file_uploader("Upload a CSV file with a 'sentence' or 'review' column", 
                                             type=['csv'])
             if uploaded_file is not None:
                 try:
                     csv_df = pd.read_csv(uploaded_file)
-                    if 'sentence' in csv_df.columns:
-                        texts = csv_df['sentence'].dropna().tolist()
-                        st.info(f"Found {len(texts)} sentences. Estimated cost: ~${len(texts) * 0.001:.3f}")
+                    text_column = None
+                    for col in ['sentence', 'review', 'text', 'content']:
+                        if col in csv_df.columns:
+                            text_column = col
+                            break
+                    
+                    if text_column:
+                        texts = csv_df[text_column].dropna().tolist()
+                        st.info(f"Found {len(texts)} reviews. Estimated cost: ~${len(texts) * 0.001:.3f}")
                         
-                        if st.button("🔍 Classify Batch (CSV)"):
+                        if st.button("Classify Batch (CSV)"):
                             process_batch_llm(texts)
                     else:
-                        st.error("CSV file must contain a 'sentence' column")
+                        st.error("CSV file must contain a 'sentence', 'review', 'text', or 'content' column")
                 except Exception as e:
                     st.error(f"Error reading CSV: {e}")
         
         else:  # Manual Input
-            manual_texts = st.text_area("Enter multiple sentences (one per line):", 
+            manual_texts = st.text_area("Enter multiple reviews (one per line):", 
                                        height=150,
-                                       placeholder="Sentence 1\\nSentence 2\\nSentence 3...")
+                                       placeholder="Review 1\\nReview 2\\nReview 3...")
             
-            if st.button("🔍 Classify Batch (Manual)") and manual_texts:
+            if st.button("Classify Batch (Manual)") and manual_texts:
                 texts = [t.strip() for t in manual_texts.strip().split('\\n') if t.strip()]
-                st.info(f"Processing {len(texts)} texts. Estimated cost: ~${len(texts) * 0.001:.3f}")
+                st.info(f"Processing {len(texts)} reviews. Estimated cost: ~${len(texts) * 0.001:.3f}")
                 process_batch_llm(texts)
 
 def process_batch_llm(texts):
     """Process a batch of texts using LLM and display results."""
     if not texts:
-        st.warning("No texts to classify!")
+        st.warning("No reviews to classify!")
         return
     
-    with st.spinner(f"Classifying {len(texts)} texts with LLM..."):
+    with st.spinner(f"Classifying {len(texts)} reviews with LLM..."):
         results = predict_with_llm(
             st.session_state.client,
             st.session_state.few_shot_examples,
@@ -468,29 +469,29 @@ def process_batch_llm(texts):
     results_df = pd.DataFrame(results)
     
     # Summary statistics
-    st.subheader("📊 Batch Results Summary")
+    st.subheader("Batch Results Summary")
     col1, col2 = st.columns(2)
     
-    red_count = sum(1 for r in results if r['prediction'] == 'Red Flag')
-    green_count = len(results) - red_count
+    positive_count = sum(1 for r in results if r['prediction'] == 'Positive')
+    negative_count = len(results) - positive_count
     
     with col1:
-        st.metric("🚩 Red Flags", red_count)
+        st.metric("Positive Reviews", positive_count)
     with col2:
-        st.metric("✅ Green Flags", green_count)
+        st.metric("Negative Reviews", negative_count)
     
     # Detailed results table
-    st.subheader("📋 Detailed Results")
+    st.subheader("Detailed Results")
     
     # Prepare display dataframe
     display_df = pd.DataFrame({
-        'Text': [r['text'][:100] + '...' if len(r['text']) > 100 else r['text'] for r in results],
-        'Prediction': results_df['prediction']
+        'Review': [r['text'][:100] + '...' if len(r['text']) > 100 else r['text'] for r in results],
+        'Sentiment': results_df['prediction']
     })
     
     # Color code the predictions
     def color_predictions(row):
-        if row['Prediction'] == 'Red Flag':
+        if row['Sentiment'] == 'Negative':
             return ['background-color: #ffebee'] * len(row)
         else:
             return ['background-color: #e8f5e8'] * len(row)
@@ -504,9 +505,9 @@ def process_batch_llm(texts):
     # Download results
     csv = results_df.to_csv(index=False)
     st.download_button(
-        label="📥 Download Results as CSV",
+        label="Download Results as CSV",
         data=csv,
-        file_name=f"llm_classification_results_{len(results)}_items.csv",
+        file_name=f"sentiment_results_{len(results)}_reviews.csv",
         mime="text/csv"
     )
 
